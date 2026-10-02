@@ -68,9 +68,9 @@ snapshot_background_path() {
   ln "$background" "$snapshot" 2>/dev/null || cp "$background" "$snapshot"
 
   # A portrait twin rides along under the same name, where the shell looks
-  # for it on screens taller than wide.
+  # for it on screens taller than wide. Only backgrounds folders have twins.
   twin="${background%/*}/portrait/${background##*/}"
-  if [[ -f $twin ]]; then
+  if [[ ${background%/*} == */backgrounds || ${background%/*} == */omarchy/backgrounds/* ]] && [[ -f $twin ]]; then
     mkdir -p "$BACKGROUND_TRANSITION_CACHE/portrait"
     ln "$twin" "$BACKGROUND_TRANSITION_CACHE/portrait/${snapshot##*/}" 2>/dev/null || cp "$twin" "$BACKGROUND_TRANSITION_CACHE/portrait/${snapshot##*/}"
   fi

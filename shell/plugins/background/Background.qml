@@ -67,10 +67,12 @@ Item {
     if (path !== preparedBackground) preparedBackground = ""
     preparedBackgroundTimer.stop()
     lastTransitionPath = path
-    // The incoming frame gates the reveal, so its size is read first.
-    requestNativeSize(path)
-    requestNativeSize(fromPath || displayedBackground)
-    requestNativeSize(finalPath)
+    // The incoming frame gates the reveal, so its size is read first. A theme
+    // switch keeps the durable path but swaps the file and its twin behind it,
+    // so it reads them again.
+    requestNativeSize(path, force)
+    requestNativeSize(fromPath || displayedBackground, false)
+    requestNativeSize(finalPath, force)
     currentBackground = finalPath
     backgroundVersion += 1
     revealStartedVersion = -1
@@ -140,24 +142,26 @@ Item {
     preparedBackgroundTimer.restart()
   }
 
-  function requestNativeSize(path) {
+  function requestNativeSize(path, refresh) {
     if (!path || isVideo(path)) return
-    queueSizeProbe(path)
+    queueSizeProbe(path, refresh)
     // The probe doubles as the existence check for a portrait twin.
-    queueSizeProbe(twinPath(path))
+    queueSizeProbe(twinPath(path), refresh)
   }
 
-  function queueSizeProbe(path) {
-    if (!path || nativeSizes[path] !== undefined || sizeQueue.indexOf(path) !== -1) return
+  // A refresh keeps the known size until the new probe replaces it.
+  function queueSizeProbe(path, refresh) {
+    if (!path || (!refresh && nativeSizes[path] !== undefined) || sizeQueue.indexOf(path) !== -1) return
     sizeQueue = sizeQueue.concat([path])
     probeNextSize()
   }
 
   // A theme may ship backgrounds/portrait/<same name> for screens taller than
-  // wide. omarchy-theme-set snapshots the twin next to its plain file, so a
-  // theme switch finds it under background-transitions/portrait/ the same way.
+  // wide, as may ~/.config/omarchy/backgrounds/<theme>/. omarchy-theme-set
+  // snapshots the twin next to its plain file, so a theme switch finds it
+  // under background-transitions/portrait/ the same way.
   function twinPath(path) {
-    var match = String(path || "").match(/^(.*\/(?:backgrounds|background-transitions))\/([^/]+)$/)
+    var match = String(path || "").match(/^(.*\/(?:backgrounds|omarchy\/backgrounds\/[^/]+|background-transitions))\/([^/]+)$/)
     return match && !isVideo(path) ? match[1] + "/portrait/" + match[2] : ""
   }
 

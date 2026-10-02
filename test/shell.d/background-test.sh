@@ -70,7 +70,7 @@ assert(
   'the displayed wallpaper waits for and decodes at the same size'
 )
 assert(
-  /function requestNativeSize\(path\) \{\s*if \(!path \|\| isVideo\(path\)/.test(backgroundQml) &&
+  /function requestNativeSize\(path, refresh\) \{\s*if \(!path \|\| isVideo\(path\)/.test(backgroundQml) &&
     /function prepareBackground[\s\S]*?requestNativeSize\(path\)/.test(backgroundQml),
   'background never probes videos and probes a prepared frame ahead of its transition'
 )
@@ -86,11 +86,20 @@ mkdir -p "$test_tmp/theme/backgrounds/portrait"
 printf 'plain\n' >"$test_tmp/theme/backgrounds/1-moonrise.png"
 printf 'twin\n' >"$test_tmp/theme/backgrounds/portrait/1-moonrise.png"
 printf 'lonely\n' >"$test_tmp/theme/backgrounds/2-lonely.png"
+mkdir -p "$test_tmp/config/omarchy/backgrounds/tokyo/portrait" "$test_tmp/Pictures/portrait"
+printf 'user\n' >"$test_tmp/config/omarchy/backgrounds/tokyo/3-user.png"
+printf 'user twin\n' >"$test_tmp/config/omarchy/backgrounds/tokyo/portrait/3-user.png"
+printf 'photo\n' >"$test_tmp/Pictures/beach.png"
+printf 'other photo\n' >"$test_tmp/Pictures/portrait/beach.png"
 twin_snapshot=$(snapshot_background_path "$test_tmp/theme/backgrounds/1-moonrise.png" next)
 lonely_snapshot=$(snapshot_background_path "$test_tmp/theme/backgrounds/2-lonely.png" previous)
 [[ $(cat "$BACKGROUND_TRANSITION_CACHE/portrait/${twin_snapshot##*/}" 2>/dev/null) == twin ]] || fail "a theme switch snapshots the portrait twin next to its plain snapshot"
 [[ ! -e $BACKGROUND_TRANSITION_CACHE/portrait/${lonely_snapshot##*/} ]] || fail "a background without a twin snapshots no twin"
-remove_background_snapshots "$twin_snapshot" "$lonely_snapshot"
+user_snapshot=$(snapshot_background_path "$test_tmp/config/omarchy/backgrounds/tokyo/3-user.png" user)
+[[ $(cat "$BACKGROUND_TRANSITION_CACHE/portrait/${user_snapshot##*/}" 2>/dev/null) == "user twin" ]] || fail "a user background snapshots its portrait twin"
+photo_snapshot=$(snapshot_background_path "$test_tmp/Pictures/beach.png" photo)
+[[ ! -e $BACKGROUND_TRANSITION_CACHE/portrait/${photo_snapshot##*/} ]] || fail "a picture outside a backgrounds folder snapshots no twin"
+remove_background_snapshots "$twin_snapshot" "$lonely_snapshot" "$user_snapshot" "$photo_snapshot"
 [[ -z $(find "$BACKGROUND_TRANSITION_CACHE" -type f) ]] || fail "removing snapshots removes their twins"
 pass "theme switch snapshots and removes portrait twins with their backgrounds"
 
@@ -98,7 +107,7 @@ run_node_test <<'JS'
 const fs = require('fs')
 
 const backgroundQml = fs.readFileSync(path.join(root, 'shell/plugins/background/Background.qml'), 'utf8')
-const extract = (name) => backgroundQml.match(new RegExp(`function ${name}\\(path\\) \\{[\\s\\S]*?\\n {2,6}\\}`))[0]
+const extract = (name) => backgroundQml.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n {2,6}\\}`))[0]
 const isVideo = (p) => /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(p)
 const twinPath = new Function('isVideo', `${extract('twinPath')}; return twinPath`)(isVideo)
 const oriented = (portrait, nativeSizes, p) =>
@@ -109,6 +118,7 @@ const twin = '/theme/backgrounds/portrait/1-moonrise.png'
 const snapshot = '/cache/background-transitions/next-42.png'
 assertEqual(twinPath(plain), twin, 'a theme background has its twin under backgrounds/portrait/')
 assertEqual(twinPath(snapshot), '/cache/background-transitions/portrait/next-42.png', 'a theme switch snapshot has its twin under the snapshot folder')
+assertEqual(twinPath('/home/me/.config/omarchy/backgrounds/tokyo/3-user.png'), '/home/me/.config/omarchy/backgrounds/tokyo/portrait/3-user.png', 'a user background has its twin under its own portrait/')
 assertEqual(twinPath('/home/me/Pictures/beach.png'), '', 'a picture outside a backgrounds folder has no twin')
 assertEqual(twinPath('/theme/backgrounds/3-clip.mp4'), '', 'a video has no twin')
 
@@ -127,10 +137,17 @@ assert(
   'base, old and incoming frames resolve the portrait twin per screen'
 )
 assert(
-  /function requestNativeSize\(path\) \{[\s\S]*?queueSizeProbe\(twinPath\(path\)\)/.test(backgroundQml) &&
+  /function requestNativeSize\(path, refresh\) \{[\s\S]*?queueSizeProbe\(twinPath\(path\), refresh\)/.test(backgroundQml) &&
     backgroundQml.includes('paths = paths.concat(paths.map(twinPath))'),
   'background probes and keeps the twin of every wallpaper in play'
 )
+// A theme switch keeps the durable path but swaps the file behind it, so the
+// twin is probed again instead of trusting the previous theme's answer.
+const probes = { nativeSizes: { [twin]: { found: false }, [plain]: {} }, sizeQueue: [], probeNextSize() {}, isVideo, twinPath }
+new Function('ctx', `with (ctx) { ${extract('requestNativeSize')}; ${extract('queueSizeProbe')}; requestNativeSize('${plain}', false); requestNativeSize('${plain}', true) }`)(probes)
+assertEqual(probes.sizeQueue.join(' '), `${plain} ${twin}`, 'a theme switch probes a known wallpaper and its twin again')
+assert(/requestNativeSize\(finalPath, force\)/.test(backgroundQml), 'theme transitions refresh the durable path they land on')
+
 assert(
   /function finishTransition\(\) \{[\s\S]*?panels\[i\]\.sized && !panels\[i\]\.baseReady\) return/.test(backgroundQml),
   'the incoming frame stays up until every screen has its final wallpaper'
