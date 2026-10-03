@@ -36,6 +36,7 @@ Item {
   property var nativeSizes: ({})
   property var sizeQueue: []
   property bool finishingTransition: false
+  property bool refreshFinal: false
   property int backgroundVersion: 0
   property int revealStartedVersion: -1
   property int pendingThemeVersion: -1
@@ -67,13 +68,12 @@ Item {
     if (path !== preparedBackground) preparedBackground = ""
     preparedBackgroundTimer.stop()
     lastTransitionPath = path
-    // The incoming frame gates the reveal, so its size is read first. A theme
-    // switch keeps the durable path but swaps the file and its twin behind it,
-    // so it reads them again.
-    requestNativeSize(path, force)
-    requestNativeSize(fromPath || displayedBackground, false)
-    requestNativeSize(finalPath, force)
+    // The incoming frame gates the reveal, so its size is read first.
+    requestNativeSize(path)
+    requestNativeSize(fromPath || displayedBackground)
+    requestNativeSize(finalPath)
     currentBackground = finalPath
+    refreshFinal = force
     backgroundVersion += 1
     revealStartedVersion = -1
 
@@ -86,6 +86,7 @@ Item {
       oldBackground = ""
       incomingBackground = ""
       preparedBackground = ""
+      if (force) forgetNativeSize(finalPath)
       displayedBackground = finalPath
       revealProgress = 1
       return
@@ -142,16 +143,15 @@ Item {
     preparedBackgroundTimer.restart()
   }
 
-  function requestNativeSize(path, refresh) {
+  function requestNativeSize(path) {
     if (!path || isVideo(path)) return
-    queueSizeProbe(path, refresh)
+    queueSizeProbe(path)
     // The probe doubles as the existence check for a portrait twin.
-    queueSizeProbe(twinPath(path), refresh)
+    queueSizeProbe(twinPath(path))
   }
 
-  // A refresh keeps the known size until the new probe replaces it.
-  function queueSizeProbe(path, refresh) {
-    if (!path || (!refresh && nativeSizes[path] !== undefined) || sizeQueue.indexOf(path) !== -1) return
+  function queueSizeProbe(path) {
+    if (!path || nativeSizes[path] !== undefined || sizeQueue.indexOf(path) !== -1) return
     sizeQueue = sizeQueue.concat([path])
     probeNextSize()
   }
@@ -163,6 +163,16 @@ Item {
   function twinPath(path) {
     var match = String(path || "").match(/^(.*\/(?:backgrounds|omarchy\/backgrounds\/[^/]+|background-transitions))\/([^/]+)$/)
     return match && !isVideo(path) ? match[1] + "/portrait/" + match[2] : ""
+  }
+
+  // A theme switch keeps the durable path but swaps the file and its twin
+  // behind it, so what was read for the previous theme no longer holds.
+  function forgetNativeSize(path) {
+    var known = Object.assign({}, nativeSizes)
+    delete known[path]
+    delete known[twinPath(path)]
+    nativeSizes = known
+    requestNativeSize(path)
   }
 
   function probeNextSize() {
@@ -218,6 +228,7 @@ Item {
       root.nativeSizes = known
       root.sizeQueue = root.sizeQueue.filter(function(queued) { return queued !== sizeProbe.path })
       root.probeNextSize()
+      root.finishTransition()
     }
   }
 
@@ -283,6 +294,9 @@ Item {
     easing.type: Easing.InOutCubic
     onFinished: {
       if (root.incomingBackground) {
+        // Read the durable path again while the incoming frame still covers
+        // every screen, so no base frame changes file during the reveal.
+        if (root.refreshFinal) root.forgetNativeSize(root.currentBackground)
         root.displayedBackground = root.currentBackground || root.incomingBackground
         root.finishingTransition = true
       }
@@ -296,6 +310,9 @@ Item {
   // ready rather than only the fastest.
   function finishTransition() {
     if (!finishingTransition) return
+    // The base frames bind the landing path once its probe, and its twin's,
+    // have answered.
+    if (sizeQueue.indexOf(currentBackground) !== -1 || sizeQueue.indexOf(twinPath(currentBackground)) !== -1) return
     var panels = backgroundPanels.instances
     for (var i = 0; i < panels.length; i++) {
       if (panels[i].sized && !panels[i].baseReady) return

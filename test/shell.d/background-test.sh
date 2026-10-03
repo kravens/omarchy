@@ -70,7 +70,7 @@ assert(
   'the displayed wallpaper waits for and decodes at the same size'
 )
 assert(
-  /function requestNativeSize\(path, refresh\) \{\s*if \(!path \|\| isVideo\(path\)/.test(backgroundQml) &&
+  /function requestNativeSize\(path\) \{\s*if \(!path \|\| isVideo\(path\)/.test(backgroundQml) &&
     /function prepareBackground[\s\S]*?requestNativeSize\(path\)/.test(backgroundQml),
   'background never probes videos and probes a prepared frame ahead of its transition'
 )
@@ -137,19 +137,25 @@ assert(
   'base, old and incoming frames resolve the portrait twin per screen'
 )
 assert(
-  /function requestNativeSize\(path, refresh\) \{[\s\S]*?queueSizeProbe\(twinPath\(path\), refresh\)/.test(backgroundQml) &&
+  /function requestNativeSize\(path\) \{[\s\S]*?queueSizeProbe\(twinPath\(path\)\)/.test(backgroundQml) &&
     backgroundQml.includes('paths = paths.concat(paths.map(twinPath))'),
   'background probes and keeps the twin of every wallpaper in play'
 )
 // A theme switch keeps the durable path but swaps the file behind it, so the
-// twin is probed again instead of trusting the previous theme's answer.
-const probes = { nativeSizes: { [twin]: { found: false }, [plain]: {} }, sizeQueue: [], probeNextSize() {}, isVideo, twinPath }
-new Function('ctx', `with (ctx) { ${extract('requestNativeSize')}; ${extract('queueSizeProbe')}; requestNativeSize('${plain}', false); requestNativeSize('${plain}', true) }`)(probes)
+// twin is probed again instead of trusting the previous theme's answer, and
+// only once the reveal is over so no base frame changes file during it.
+const probes = { nativeSizes: { [twin]: { found: false }, [plain]: {}, other: {} }, sizeQueue: [], probeNextSize() {}, isVideo, twinPath }
+new Function('ctx', `with (ctx) { ${extract('requestNativeSize')}; ${extract('queueSizeProbe')}; ${extract('forgetNativeSize')}; requestNativeSize('${plain}'); forgetNativeSize('${plain}') }`)(probes)
 assertEqual(probes.sizeQueue.join(' '), `${plain} ${twin}`, 'a theme switch probes a known wallpaper and its twin again')
-assert(/requestNativeSize\(finalPath, force\)/.test(backgroundQml), 'theme transitions refresh the durable path they land on')
+assertEqual(Object.keys(probes.nativeSizes).join(' '), 'other', 'a theme switch drops only the answers for the path it lands on')
+assert(
+  /onFinished: \{\s*if \(root\.incomingBackground\) \{[\s\S]*?if \(root\.refreshFinal\) root\.forgetNativeSize\(root\.currentBackground\)/.test(backgroundQml) &&
+    /if \(force\) forgetNativeSize\(finalPath\)\s*displayedBackground = finalPath/.test(backgroundQml),
+  'theme transitions read the durable path again once the reveal is over, or at once when instant'
+)
 
 assert(
-  /function finishTransition\(\) \{[\s\S]*?panels\[i\]\.sized && !panels\[i\]\.baseReady\) return/.test(backgroundQml),
+  /function finishTransition\(\) \{[\s\S]*?sizeQueue\.indexOf\(twinPath\(currentBackground\)\) !== -1\) return[\s\S]*?panels\[i\]\.sized && !panels\[i\]\.baseReady\) return/.test(backgroundQml),
   'the incoming frame stays up until every screen has its final wallpaper'
 )
 JS
